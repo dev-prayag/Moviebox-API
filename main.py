@@ -1,47 +1,14 @@
 import os
-import asyncio
 from pathlib import Path
-from contextlib import asynccontextmanager
-import httpx
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, HTMLResponse
 
-import state
-import providers
-from config import (
-    API_VERSION, PORT, BIND_HOST, CORS_ORIGINS, REQUEST_TIMEOUT,
-)
+from config import API_VERSION, PORT, BIND_HOST, CORS_ORIGINS
 from routes import router
 
 
 APP_PATH = Path(__file__).parent / "app.html"
 DASHBOARD_PATH = Path(__file__).parent / "api_dashboard.html"
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    state.client = httpx.AsyncClient(
-        timeout=httpx.Timeout(REQUEST_TIMEOUT, connect=10.0),
-        limits=httpx.Limits(
-            max_connections=50,
-            max_keepalive_connections=20,
-            keepalive_expiry=30.0,
-        ),
-        follow_redirects=True,
-    )
-    state.probe_task = asyncio.create_task(providers.probe_loop())
-    try:
-        yield
-    finally:
-        if state.probe_task is not None:
-            state.probe_task.cancel()
-            try:
-                await state.probe_task
-            except asyncio.CancelledError:
-                pass
-        if state.client is not None:
-            await state.client.aclose()
-            state.client = None
 
 
 app = FastAPI(
@@ -53,7 +20,6 @@ app = FastAPI(
         "name": "MIT",
         "url": "https://github.com/faisaljs/Moviebox-API/blob/main/LICENSE",
     },
-    lifespan=lifespan,
 )
 
 
@@ -63,7 +29,8 @@ async def reject_cross_origin_mutations(request: Request, call_next):
         origin = request.headers.get("origin")
         if origin:
             scheme = request.headers.get("x-forwarded-proto", request.url.scheme).split(",")[0].strip()
-            same_origin = f"{scheme}://{request.headers.get('host', request.url.netloc)}"
+            host = request.headers.get("x-forwarded-host") or request.headers.get("host", request.url.netloc)
+            same_origin = f"{scheme}://{host.split(',')[0].strip()}"
             if origin.rstrip("/") not in {same_origin.rstrip("/"), *CORS_ORIGINS}:
                 return JSONResponse(
                     status_code=403,
