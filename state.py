@@ -1,6 +1,7 @@
 import asyncio
 import httpx
 from fastapi import HTTPException
+from config import REQUEST_TIMEOUT
 
 client: httpx.AsyncClient | None = None
 bearer_tokens: dict[str, tuple[str, float]] = {}
@@ -12,6 +13,15 @@ probe_task: asyncio.Task | None = None
 
 
 def require_client() -> httpx.AsyncClient:
-    if client is None:
-        raise HTTPException(status_code=503, detail="Server initializing, retry shortly")
+    global client
+    if client is None or client.is_closed:
+        client = httpx.AsyncClient(
+            timeout=httpx.Timeout(REQUEST_TIMEOUT, connect=10.0),
+            limits=httpx.Limits(
+                max_connections=50,
+                max_keepalive_connections=20,
+                keepalive_expiry=30.0,
+            ),
+            follow_redirects=True,
+        )
     return client
